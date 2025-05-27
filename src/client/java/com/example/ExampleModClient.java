@@ -7,7 +7,7 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.command.CommandRegistryAccess;
-import net.minecraft.command.argument.IntegerArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.minecraft.network.packet.c2s.play.*;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
