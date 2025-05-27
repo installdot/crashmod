@@ -16,7 +16,7 @@ import net.minecraft.util.math.Direction;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class SpammerMod implements ClientModInitializer {
+public class ExampleModClient implements ClientModInitializer {
 
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final AtomicBoolean running = new AtomicBoolean(false);
