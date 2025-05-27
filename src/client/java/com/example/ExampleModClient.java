@@ -1,129 +1,148 @@
 package com.example;
 
 import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientCommandSource;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.command.CommandRegistryAccess;
+import net.minecraft.command.argument.IntegerArgumentType;
 import net.minecraft.network.packet.c2s.play.*;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.*;
+import net.minecraft.util.math.random.Random;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.*;
 
-import java.util.Random;
-
 public class ExampleModClient implements ClientModInitializer {
+
     private boolean running = false;
     private int mode = 0;
-    private long lastSend = 0;
-    private int delay = 100;
-    private int maxDistance = 32;
-    private final Random random = new Random();
+    private int delay = 1;
+    private int maxDistance = 5;
+    private long lastSendTime = 0;
 
     private final String[] methodNames = {
-        "PlayerMove Packet",
-        "PlayerAction Packet",
-        "InteractBlock Packet"
+        "Move Packet",
+        "Interact Packet",
+        "Mine Packet"
     };
 
     @Override
     public void onInitializeClient() {
-        // Register /m commands
-        ClientCommandRegistrationCallback.EVENT.register(this::registerCommands);
-
-        // Send packets on tick
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (!running || client.player == null || client.getNetworkHandler() == null) return;
-            long now = System.currentTimeMillis();
-            if (now - lastSend >= delay) {
-                sendPacket(client);
-                lastSend = now;
-            }
-        });
-
-        // Auto stop if disconnected
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-            running = false;
-            if (client.player != null)
-                client.player.sendMessage(Text.literal("§cStopped spam: disconnected from server"), false);
-        });
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> registerCommands(dispatcher));
     }
 
-    private void sendPacket(MinecraftClient client) {
-        BlockPos pos = client.player.getBlockPos().add(
-            random.nextInt(maxDistance * 2 + 1) - maxDistance,
-            random.nextInt(256),
-            random.nextInt(maxDistance * 2 + 1) - maxDistance
-        );
-
-        switch (mode) {
-            case 0 -> {
-                // PlayerMoveC2SPacket with Vec3d
-                Vec3d movePos = new Vec3d(
-                    client.player.getX() + random.nextInt(maxDistance * 2 + 1) - maxDistance,
-                    client.player.getY(),
-                    client.player.getZ() + random.nextInt(maxDistance * 2 + 1) - maxDistance
-                );
-                client.getNetworkHandler().sendPacket(
-                    new PlayerMoveC2SPacket.PositionAndOnGround(movePos, true, true)
-                );
-            }
-            case 1 -> {
-                // PlayerAction (start dig)
-                client.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-                    PlayerActionC2SPacket.Action.START_DESTROY_BLOCK,
-                    pos,
-                    Direction.UP
-                ));
-            }
-            case 2 -> {
-                // InteractBlock packet
-                BlockHitResult hit = new BlockHitResult(pos.toCenterPos(), Direction.UP, pos, false);
-                client.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hit, 0));
-            }
-        }
-    }
-
-    private void registerCommands(CommandDispatcher<ClientCommandSource> dispatcher, CommandRegistryAccess registryAccess) {
+    private void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         dispatcher.register(literal("m")
             .executes(ctx -> {
-                MinecraftClient.getInstance().player.sendMessage(Text.literal("§6/m <id> - Start method\n§6/m r <delay_ms> - Set rate\n§6/m d <max_distance> - Set max range\n§6/m stop - Stop"), false);
+                ctx.getSource().sendFeedback(Text.literal("Available methods:"));
                 for (int i = 0; i < methodNames.length; i++) {
-                    MinecraftClient.getInstance().player.sendMessage(Text.literal("§7[" + i + "] " + methodNames[i]), false);
+                    ctx.getSource().sendFeedback(Text.literal(i + ": " + methodNames[i]));
                 }
                 return 1;
             })
+            .then(literal("r")
+                .then(argument("rate", IntegerArgumentType.integer(1)).executes(ctx -> {
+                    delay = IntegerArgumentType.getInteger(ctx, "rate");
+                    ctx.getSource().sendFeedback(Text.literal("Packet delay set to " + delay + " ticks"));
+                    return 1;
+                }))
+            )
+            .then(literal("d")
+                .then(argument("distance", IntegerArgumentType.integer(1)).executes(ctx -> {
+                    maxDistance = IntegerArgumentType.getInteger(ctx, "distance");
+                    ctx.getSource().sendFeedback(Text.literal("Max distance set to " + maxDistance));
+                    return 1;
+                }))
+            )
             .then(literal("stop").executes(ctx -> {
                 running = false;
-                MinecraftClient.getInstance().player.sendMessage(Text.literal("§cStopped packet spam."), false);
+                ctx.getSource().sendFeedback(Text.literal("Stopped."));
                 return 1;
             }))
-            .then(literal("r").then(argument("rate", IntegerArgumentType.integer(1)).executes(ctx -> {
-                delay = IntegerArgumentType.getInteger(ctx, "rate");
-                MinecraftClient.getInstance().player.sendMessage(Text.literal("§aRate set to " + delay + " ms"), false);
-                return 1;
-            })))
-            .then(literal("d").then(argument("distance", IntegerArgumentType.integer(1)).executes(ctx -> {
-                maxDistance = IntegerArgumentType.getInteger(ctx, "distance");
-                MinecraftClient.getInstance().player.sendMessage(Text.literal("§aMax distance set to " + maxDistance), false);
-                return 1;
-            })))
-            .then(argument("mode", IntegerArgumentType.integer(0, methodNames.length - 1)).executes(ctx -> {
-                mode = IntegerArgumentType.getInteger(ctx, "mode");
-                running = true;
-                lastSend = 0;
-                MinecraftClient.getInstance().player.sendMessage(Text.literal("§aStarted: " + methodNames[mode]), false);
-                return 1;
-            }))
+            .then(literal("start")
+                .then(argument("mode", IntegerArgumentType.integer(0, methodNames.length - 1)).executes(ctx -> {
+                    mode = IntegerArgumentType.getInteger(ctx, "mode");
+                    running = true;
+                    ctx.getSource().sendFeedback(Text.literal("Started method: " + methodNames[mode]));
+                    return 1;
+                }))
+            )
+        );
+    }
+
+    private final Random random = Random.create();
+
+    public ExampleModClient() {
+        // Start a tick thread
+        new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(50); // 1 tick = 50ms
+                    if (running) {
+                        long now = System.currentTimeMillis();
+                        if ((now - lastSendTime) >= delay * 50) {
+                            lastSendTime = now;
+                            MinecraftClient client = MinecraftClient.getInstance();
+                            if (client.player == null || client.getNetworkHandler() == null) {
+                                running = false;
+                                continue;
+                            }
+
+                            switch (mode) {
+                                case 0 -> sendMovePacket(client);
+                                case 1 -> sendInteractPacket(client);
+                                case 2 -> sendMinePacket(client);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    running = false;
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+
+    private void sendMovePacket(MinecraftClient client) {
+        ClientPlayerEntity player = client.player;
+        double dx = (random.nextDouble() - 0.5) * 2 * maxDistance;
+        double dz = (random.nextDouble() - 0.5) * 2 * maxDistance;
+        double x = player.getX() + dx;
+        double y = player.getY();
+        double z = player.getZ() + dz;
+        client.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, true, true));
+    }
+
+    private void sendInteractPacket(MinecraftClient client) {
+        ClientPlayerEntity player = client.player;
+        BlockPos pos = player.getBlockPos().add(
+            random.nextBetween(-maxDistance, maxDistance),
+            0,
+            random.nextBetween(-maxDistance, maxDistance)
+        );
+        BlockHitResult hit = new BlockHitResult(
+            Vec3d.ofCenter(pos),
+            Direction.UP,
+            pos,
+            false
+        );
+        client.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hit, 0));
+    }
+
+    private void sendMinePacket(MinecraftClient client) {
+        ClientPlayerEntity player = client.player;
+        BlockPos pos = player.getBlockPos().add(
+            random.nextBetween(-maxDistance, maxDistance),
+            0,
+            random.nextBetween(-maxDistance, maxDistance)
+        );
+        client.getNetworkHandler().sendPacket(
+            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, Direction.UP)
         );
     }
 }
